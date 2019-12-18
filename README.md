@@ -1,6 +1,7 @@
 In this fork I added different functionalities here listed:
 * Constant defining
 * Module operation
+* Circular left and right bitwise shift operation
 * Implicit instruction
 * For loop support
 * Loop control support (continue and break)
