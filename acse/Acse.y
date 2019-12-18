@@ -16,8 +16,8 @@
 
 #include <stdio.h>       
 #include <stdlib.h>
+#include <limits.h>
 #include <assert.h>
-#include <malloc/malloc.h>
 #include "axe_struct.h"
 #include "axe_engine.h"
 #include "symbol_table.h"
@@ -89,9 +89,15 @@ t_reg_allocator *RA;       /* Register allocator. It implements the "Linear scan
                             * algorythm */
 
 t_io_infos *file_infos;    /* input and output files used by the compiler */
+t_list* define_list = NULL;
+
+t_axe_label *current_label_jump_next;
+t_axe_label *current_label_end;
+
+extern int yylex(void);
+extern int yyerror(const char* errmsg);
 
 %}
-
 %expect 1
 
 /*=========================================================================
@@ -106,53 +112,45 @@ t_io_infos *file_infos;    /* input and output files used by the compiler */
    t_list *list;
    t_axe_label *label;
    t_while_statement while_stmt;
-   t_unless_statement unless_stmt;
-   t_foreach_statement foreach_stmt;
+   t_forall_statement forall_stmt;
 } 
 /*=========================================================================
                                TOKENS 
- Nei tokens, alcuni sono preceduti dalla struttura che devono chiamare.
- Ad esempio, il WHILE ha in fronte <while_stmt> che va ad istanziare la relativa
- struttura. Ci si può referenziare a questa usando $1 nella grammatica, andando
- a recuperare le variabili della struttura stessa ($1 perchè è il primo parametro).
- 
- Altre, ad esempio il DO, non hanno bisogno di una struttura complessa ma di una
- sola label, perciò si utilizza semplicemente <label> e ci si riferenzia ad essa
- come $1. Si può infatti creare $1 = newLabel(program);
- 
- Altre ancora, non hanno nessuna "entità" in fronte: questo perchè non necessitano
- di label per fare dei jump o simili (esempio: RETURN, WRITE...)
- 
 =========================================================================*/
 %start program
 
 %token LBRACE RBRACE LPAR RPAR LSQUARE RSQUARE
 %token SEMI COLON PLUS MINUS MUL_OP DIV_OP MOD_OP
 %token AND_OP OR_OP NOT_OP
-%token ASSIGN LT GT SHL_OP SHR_OP EQ NOTEQ LTEQ GTEQ
+%token ASSIGN LT GT SHL_OP SHR_OP C_SHL_OP C_SHR_OP EQ NOTEQ LTEQ GTEQ
 %token ANDAND OROR
 %token COMMA
+%token FOR
 %token RETURN
 %token READ
 %token WRITE
+%token DEFINE
+%token IMPLICIT
+%token TO
+%token DOWNTO
+%token BREAK
+%token CONTINUE
 
 %token <label> DO
 %token <while_stmt> WHILE
+%token <forall_stmt> FORALL
 %token <label> IF
 %token <label> ELSE
 %token <intval> TYPE
 %token <svalue> IDENTIFIER
 %token <intval> NUMBER
-%token <unless_stmt> EVAL
-%token <label> UNLESS
-%token <foreach_stmt> FOR
 
 %type <expr> exp
-%type <expr> assign_statement
 %type <decl> declaration
 %type <list> declaration_list
 %type <label> if_stmt
-%type <label> unless_statement
+%type <intval> direction
+%type <intval> loop_control
 
 /*=========================================================================
                           OPERATOR PRECEDENCES
@@ -167,8 +165,9 @@ t_io_infos *file_infos;    /* input and output files used by the compiler */
 %left EQ NOTEQ
 %left LT GT LTEQ GTEQ
 %left SHL_OP SHR_OP
+%left C_SHL_OP C_SHR_OP
 %left MINUS PLUS
-%left MUL_OP DIV_OP
+%left MUL_OP DIV_OP MOD_OP
 %right NOT
 
 /*=========================================================================
@@ -182,7 +181,12 @@ t_io_infos *file_infos;    /* input and output files used by the compiler */
       2. A list of instructions. (at least one instruction!).
  * When the rule associated with the non-terminal `program' is executed,
  * the parser notify it to the `program' singleton instance. */
-program  : var_declarations statements
+program  : {
+		t_axe_declaration* implicit = alloc_declaration(strdup("$implicit"), 0, 0, 0);
+		t_list *var_list = addFirst(NULL, implicit);
+		set_new_variables(program, INTEGER_TYPE, var_list);
+	   }
+	define_declarations var_declarations statements
          {
             /* Notify the end of the program. Once called
              * the function `set_end_Program' - if necessary -
@@ -194,6 +198,17 @@ program  : var_declarations statements
             YYACCEPT;
          }
 ;
+
+define_declarations : define_declarations define_declaration //left recursive only -> no amibiguity and no shift/reduce conflicts
+		      | ; 
+
+define_declaration : DEFINE IDENTIFIER NUMBER {
+			defines* define = (defines*) malloc(sizeof(defines));
+			define->name = strdup($2);
+			define->value = $3;
+			free($2);
+			define_list = addFirst(define_list, define);
+		}
 
 var_declarations : var_declarations var_declaration   { /* does nothing */ }
                  | /* empty */                        { /* does nothing */ }
@@ -262,14 +277,30 @@ statements  : statements statement       { /* does nothing */ }
 statement   : assign_statement SEMI      { /* does nothing */ }
             | control_statement          { /* does nothing */ }
             | read_write_statement SEMI  { /* does nothing */ }
+      	    | exp SEMI {
+      		       int implicit = get_symbol_location(program, "$implicit", 0);
+      		       if($1.expression_type == IMMEDIATE)
+      		       	    gen_addi_instruction(program, implicit, REG_0, $1.value);
+      		       else
+      			    gen_add_instruction(program, implicit, REG_0, $1.value, CG_DIRECT_ALL);	 
+      		   }
+            | loop_control SEMI {
+                    if($1) 
+                      gen_bt_instruction(program, current_label_jump_next, 0);
+                    else
+                      gen_bt_instruction(program, current_label_end, 0);
+            }
             | SEMI            { gen_nop_instruction(program); }
 ;
 
+loop_control  : BREAK {$$ = 0;}
+              | CONTINUE {$$ = 1;}
+;
+
 control_statement : if_statement         { /* does nothing */ }
-			| unless_statement			 { /* does nothing */ }
             | while_statement            { /* does nothing */ }
             | do_while_statement SEMI    { /* does nothing */ }
-			| foreach_statement			 { /* does nothing */ }
+	          | forall_statement 	 	 { /* does nothing */ }
             | return_statement SEMI      { /* does nothing */ }
 ;
 
@@ -279,24 +310,51 @@ read_write_statement : read_statement  { /* does nothing */ }
 
 assign_statement : IDENTIFIER LSQUARE exp RSQUARE ASSIGN exp
             {
+               /* Notify to `program' that the value $6
+                * have to be assigned to the location
+                * addressed by $1[$3]. Where $1 is obviously
+                * the array/pointer identifier, $3 is an expression
+                * that holds an integer value. That value will be
+                * used as an index for the array $1 */
                storeArrayElement(program, $1, $3, $6);
-			   $$ = create_expression($6.value, IMMEDIATE);
+
+               /* free the memory associated with the IDENTIFIER.
+                * The use of the free instruction is required
+                * because of the value associated with IDENTIFIER.
+                * The value of IDENTIFIER is a string created
+                * by a call to the function `strdup' (see Acse.lex) */
                free($1);
             }
             | IDENTIFIER ASSIGN exp
             {
                int location;
+
+               /* in order to assign a value to a variable, we have to
+                * know where the variable is located (i.e. in which register).
+                * the function `get_symbol_location' is used in order
+                * to retrieve the register location assigned to
+                * a given identifier.
+                * A symbol table keeps track of the location of every
+                * declared variable.
+                * `get_symbol_location' perform a query on the symbol table
+                * in order to discover the correct location of
+                * the variable with $1 as identifier */
+               
+               /* get the location of the symbol with the given ID. */
                location = get_symbol_location(program, $1, 0);
 
-               if ($3.expression_type == IMMEDIATE) {
-					gen_addi_instruction(program, location, REG_0, $3.value);
-					$$ = create_expression($3.value, IMMEDIATE);
-			   }
-               else {
-			        gen_add_instruction(program, location, REG_0, $3.value, CG_DIRECT_ALL);
-					$$ = create_expression($3.value, REGISTER);
-			   }
-			   free($1);
+               /* update the value of location */
+               if ($3.expression_type == IMMEDIATE)
+                  gen_move_immediate(program, location, $3.value);
+               else
+                  gen_add_instruction(program,
+                                      location,
+                                      REG_0,
+                                      $3.value,
+                                      CG_DIRECT_ALL);
+
+               /* free the memory associated with the IDENTIFIER */
+               free($1);
             }
 ;
             
@@ -344,30 +402,6 @@ if_stmt  :  IF
                code_block { $$ = $1; }
 ;
 
-unless_statement : EVAL {
-				$1 = create_unless_statement();
-				$1.condition = newLabel(program);
-				$1.code_block = newLabel(program);
-				$1.end = newLabel(program);
-				gen_bt_instruction(program, $1.condition, 0);
-				assignLabel(program, $1.code_block);
-			} 
-			code_block {
-				gen_bt_instruction(program, $1.end, 0);
-				assignLabel(program, $1.condition);
-			}
-			UNLESS exp {
-				if ($6.expression_type == IMMEDIATE) {
-					gen_load_immediate(program, $6.value);
-				}
-				else {
-					gen_andb_instruction(program, $6.value, $6.value, $6.value, CG_DIRECT_ALL);
-				}
-				gen_beq_instruction(program, $1.code_block, 0);
-				assignLabel(program, $1.end);
-			}
-;
-
 while_statement  : WHILE
                   {
                      /* initialize the value of the non-terminal */
@@ -376,6 +410,7 @@ while_statement  : WHILE
                      /* reserve and fix a new label */
                      $1.label_condition
                            = assignNewLabel(program);
+		     current_label_jump_next = $1.label_condition;
                   }
                   LPAR exp RPAR
                   {
@@ -389,6 +424,7 @@ while_statement  : WHILE
                       * to the first instruction after the while code
                       * block */
                      $1.label_end = newLabel(program);
+		     current_label_end = $1.label_end;
 
                      /* if `exp' returns FALSE, jump to the label $1.label_end */
                      gen_beq_instruction (program, $1.label_end, 0);
@@ -403,18 +439,65 @@ while_statement  : WHILE
                      assignLabel(program, $1.label_end);
                   }
 ;
+
+forall_statement  : FORALL
+                  {
+                     /* initialize the value of the non-terminal */
+                     $1 = create_forall_statement();
+                     
+                  }
+                  LPAR IDENTIFIER ASSIGN exp direction exp RPAR
+                  {
+            		     $1.index_location = get_symbol_location(program, $4, 0);
+            		     t_axe_expression loop_exp = create_expression($1.index_location, REGISTER);
+			     loop_exp = handle_bin_numeric_op(program, loop_exp, $6, ADD);
+			     gen_add_instruction(program, $1.index_location, loop_exp.value, REG_0, CG_DIRECT_ALL);
+            		     $1.loop_condition = $8;
+            		     $1.label_condition = assignNewLabel(program);
+			     loop_exp = create_expression($1.index_location, REGISTER);
+		             handle_bin_numeric_op(program, $1.loop_condition, loop_exp, SUB); //exploiting PSW
+		             /* reserve a new label. This new label will point
+		              * to the first instruction after the forall code
+		              * block */
+		             $1.label_end = newLabel(program);
+		             current_label_end = $1.label_end;
+
+                     /* if `exp' returns FALSE, jump to the label $1.label_end */
+		                 gen_beq_instruction (program, $1.label_end, 0);
+				$1.label_jump_next = newLabel(program);
+			     	current_label_jump_next = $1.label_jump_next;
+                  }
+                  code_block
+                  {
+                     /* jump to the beginning of the loop */
+			     assignLabel(program, $1.label_jump_next);
+            		     if($7)
+            			     gen_subi_instruction(program, $1.index_location, $1.index_location, 1);
+            		     else
+            			     gen_addi_instruction(program, $1.index_location, $1.index_location, 1);
+                     gen_bt_instruction(program, $1.label_condition, 0);
+
+                     /* fix the label `label_end' */
+                     assignLabel(program, $1.label_end);
+                  }
+;
+
+direction : TO {$$ = 0;}
+	        | DOWNTO {$$ = 1;};
                   
 do_while_statement  : DO
                      {
                         /* the label that points to the address where to jump if
                          * `exp' is not verified */
                         $1 = newLabel(program);
-                        
+                        current_label_jump_next = $1;
                         /* fix the label */
                         assignLabel(program, $1);
                      }
                      code_block WHILE LPAR exp RPAR
                      {
+			   t_axe_label* label_end = newLabel(program);
+			   current_label_end = label_end;
                            if ($6.expression_type == IMMEDIATE)
                                gen_load_immediate(program, $6.value);
                            else
@@ -423,39 +506,9 @@ do_while_statement  : DO
 
                            /* if `exp' returns TRUE, jump to the label $1 */
                            gen_bne_instruction (program, $1, 0);
+			   assignLabel(program, label_end);
                      }
 ;
-
-foreach_statement : FOR  
-			{
-				$1.counter = getNewRegister(program);
-				gen_addi_instruction(program, $1.counter, REG_0, 0);
-				$1.iteration = newLabel(program);
-				$1.end = newLabel(program);
-				assignLabel(program, $1.iteration);
-			}
-			LPAR IDENTIFIER COLON IDENTIFIER RPAR 
-			{
-				int var_location = get_symbol_location(program, $4, 0);
-				t_axe_variable * array_declaration = getVariable(program, $6);
-				
-				int temp_register = getNewRegister(program);
-				gen_subi_instruction(program, temp_register, $1.counter, array_declaration->arraySize);
-				gen_beq_instruction(program, $1.end, 0);
-					
-				int new_value = loadArrayElement(program, $6, create_expression($1.counter, REGISTER));
-				gen_add_instruction(program, var_location, REG_0, new_value, CG_DIRECT_ALL);
-				free($4);
-				free($6);
-			}
-			code_block 
-			{
-				gen_addi_instruction(program, $1.counter, $1.counter, 1);
-				gen_bt_instruction(program, $1.iteration, 0);
-				assignLabel(program, $1.end);
-			}
-;
-
 
 return_statement : RETURN
             {
@@ -505,17 +558,29 @@ write_statement : WRITE LPAR exp RPAR
 
 exp: NUMBER      { $$ = create_expression ($1, IMMEDIATE); }
    | IDENTIFIER  {
-                     int location;
-   
-                     /* get the location of the symbol with the given ID */
-                     location = get_symbol_location(program, $1, 0);
-                     
-                     /* return the register location of IDENTIFIER as
-                      * a value for `exp' */
-                     $$ = create_expression (location, REGISTER);
-
-                     /* free the memory associated with the IDENTIFIER */
-                     free($1);
+		     t_list* temp = define_list;
+		     int found = 0;
+		     while(temp != NULL) {
+		     	defines* define = (defines*) temp->data;
+		     	if(strcmp(define->name, $1) == 0) {
+		     		$$ = create_expression(define->value, IMMEDIATE);
+				found = 1;
+				break;
+			}
+			temp = temp->next;
+		     }
+		     if(!found) {
+		             int location;
+	   
+		             /* get the location of the symbol with the given ID */
+		             location = get_symbol_location(program, $1, 0);
+		             
+		             /* return the register location of IDENTIFIER as
+		              * a value for `exp' */
+		             $$ = create_expression (location, REGISTER);
+		     }
+		     /* free the memory associated with the IDENTIFIER */
+		     free($1);
    }
    | IDENTIFIER LSQUARE exp RSQUARE {
                      int reg;
@@ -557,7 +622,6 @@ exp: NUMBER      { $$ = create_expression ($1, IMMEDIATE); }
                            /* free the memory associated with the IDENTIFIER */
                            free($2);
    }
-   | assign_statement {}
    | exp AND_OP exp     {
                            $$ = handle_bin_numeric_op(program, $1, $3, ANDB);
    }
@@ -576,6 +640,17 @@ exp: NUMBER      { $$ = create_expression ($1, IMMEDIATE); }
    | exp DIV_OP exp     {
                            $$ = handle_bin_numeric_op(program, $1, $3, DIV);
    }
+   | exp MOD_OP exp     {
+			   
+			   //do not try to extend acse source code, too complex: you'll have to extend assembly instructions and its execution too
+			   if($1.expression_type == IMMEDIATE & $3.expression_type == IMMEDIATE)
+				$$ = create_expression($1.value % $3.value, IMMEDIATE);
+		       	   else {
+				t_axe_expression exp1 = handle_bin_numeric_op(program, $1, $3, DIV);
+				t_axe_expression exp2 = handle_bin_numeric_op(program, exp1, $3, MUL);
+				$$ = handle_bin_numeric_op(program, $1, exp2, SUB);
+			   }		
+			}	
    | exp LT exp      {
                         $$ = handle_binary_comparison (program, $1, $3, _LT_);
    }
@@ -596,6 +671,26 @@ exp: NUMBER      { $$ = create_expression ($1, IMMEDIATE); }
    }
    | exp SHL_OP exp  {  $$ = handle_bin_numeric_op(program, $1, $3, SHL); }
    | exp SHR_OP exp  {  $$ = handle_bin_numeric_op(program, $1, $3, SHR); }
+   | exp C_SHL_OP exp {
+			t_axe_expression zero = create_expression(0, IMMEDIATE);
+			t_axe_expression exp1 = handle_bin_numeric_op(program, $1, zero, ADD);
+			t_axe_expression exp2 = handle_bin_numeric_op(program, $3, zero, ADD);
+			t_axe_expression exp3 = handle_bin_numeric_op(program, exp1, exp2, SHR);
+			t_axe_expression const_exp = create_expression(sizeof(int) * 8, IMMEDIATE);
+			t_axe_expression exp4 = handle_bin_numeric_op(program, const_exp, exp2, SUB);
+			t_axe_expression exp5 = handle_bin_numeric_op(program, exp1, exp4, SHL);
+			$$ = handle_bin_numeric_op(program, exp3, exp5, ORB);
+		      }
+   | exp C_SHR_OP exp {
+			t_axe_expression zero = create_expression(0, IMMEDIATE);
+			t_axe_expression exp1 = handle_bin_numeric_op(program, $1, zero, ADD);
+			t_axe_expression exp2 = handle_bin_numeric_op(program, $3, zero, ADD);
+			t_axe_expression exp3 = handle_bin_numeric_op(program, exp1, exp2, SHL);
+			t_axe_expression const_exp = create_expression(sizeof(int) * 8, IMMEDIATE);
+			t_axe_expression exp4 = handle_bin_numeric_op(program, const_exp, exp2, SUB);
+			t_axe_expression exp5 = handle_bin_numeric_op(program, exp1, exp4, SHR);
+			$$ = handle_bin_numeric_op(program, exp3, exp5, ORB);
+		      }
    | exp ANDAND exp  {  $$ = handle_bin_numeric_op(program, $1, $3, ANDL); }
    | exp OROR exp    {  $$ = handle_bin_numeric_op(program, $1, $3, ORL); }
    | LPAR exp RPAR   { $$ = $2; }
@@ -617,6 +712,9 @@ exp: NUMBER      { $$ = create_expression ($1, IMMEDIATE); }
                                  (program, exp_r0, $2, SUB);
                         }
                      }
+    | IMPLICIT {
+		int implicit = get_symbol_location(program, "$implicit", 0); 
+		$$ = create_expression(implicit, REGISTER); }
 ;
 
 %%
