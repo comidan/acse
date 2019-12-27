@@ -10,5 +10,5 @@ if (x >= 0) {
    }
    write(s);
 } else {
-   write(-1);
+   write(1);
 }

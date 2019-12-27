@@ -1,0 +1,9 @@
+--------------------------------
+          SYMBOL TABLE
+--------------------------------
+NUMBER OF SYMBOLS : 3 
+--------------------------------
+
+ID : $implicit	;; TYPE : INTEGER	;; LOCATION : R1 
+ID : i	;; TYPE : INTEGER	;; LOCATION : R2 
+ID : x	;; TYPE : INTEGER	;; LOCATION : R3 

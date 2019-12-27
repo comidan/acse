@@ -1,0 +1,5 @@
+numerino a;
+numerino *b;
+b = &a;
+*b = 3;
+escilo(a);

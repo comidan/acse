@@ -1,0 +1,4 @@
+int a;
+read(a);
+a * a + 2;
+write($implicit);

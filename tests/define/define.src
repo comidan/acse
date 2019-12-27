@@ -1,0 +1,5 @@
+#DEFINE X 3
+
+int variable;
+read(variable);
+write(variable * X + 1);

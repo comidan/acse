@@ -1,0 +1,14 @@
+#costantina y 3
+numerino i,x;
+entralo(x);
+4+5;
+finoallafine (i = 0 finlasù 10)
+{
+    vediamose(i==5)
+	chopchop;		
+    escilo(i);
+    escilo(y);
+}
+escilo(x);
+escilo(y);
+escilo(losai);

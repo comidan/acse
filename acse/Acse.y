@@ -90,6 +90,7 @@ t_reg_allocator *RA;       /* Register allocator. It implements the "Linear scan
 
 t_io_infos *file_infos;    /* input and output files used by the compiler */
 t_list* define_list = NULL;
+t_list* pointer_list = NULL;
 
 t_axe_label *current_label_jump_next;
 t_axe_label *current_label_end;
@@ -259,6 +260,31 @@ declaration : IDENTIFIER ASSIGN NUMBER
                if ($$ == NULL)
                   notifyError(AXE_OUT_OF_MEMORY);
             }
+	    | MUL_OP IDENTIFIER ASSIGN NUMBER
+	    {
+		$$ = alloc_declaration($2, 0, 0, $4);
+
+               /* test if an `out of memory' occurred */
+               if ($$ == NULL)
+                  notifyError(AXE_OUT_OF_MEMORY);
+		pointer* pointer_ = (pointer*) malloc(sizeof(pointer_));
+		pointer_->name = strdup($2);
+		pointer_->address = $4;
+		free($2);
+		pointer_list = addFirst(pointer_list, pointer_);
+	    }
+	    | MUL_OP IDENTIFIER
+	    {
+		$$ = alloc_declaration($2, 0, 0, 0);
+               
+               /* test if an `out of memory' occurred */
+               if ($$ == NULL)
+                  notifyError(AXE_OUT_OF_MEMORY);
+		pointer* pointer_ = (pointer*) malloc(sizeof(pointer_));
+		pointer_->name = strdup($2);
+		free($2);
+		pointer_list = addFirst(pointer_list, pointer_);
+ 	    }
 ;
 
 /* A block of code can be either a single statement or
@@ -341,21 +367,75 @@ assign_statement : IDENTIFIER LSQUARE exp RSQUARE ASSIGN exp
                 * the variable with $1 as identifier */
                
                /* get the location of the symbol with the given ID. */
-               location = get_symbol_location(program, $1, 0);
+	       t_list* temp = pointer_list;
+	       int found = 0;
+	       while(temp != NULL) {
+	       	pointer* pointer_ = (pointer*) temp->data;
+		if(strcmp(pointer_->name, $1) == 0) {
+			pointer_->address = $3.value;
+			found = 1;
+			break;
+		}
+		temp = temp->next;
+	       }
+	       if(!found) {
+               	location = get_symbol_location(program, $1, 0);
 
                /* update the value of location */
-               if ($3.expression_type == IMMEDIATE)
-                  gen_move_immediate(program, location, $3.value);
-               else
-                  gen_add_instruction(program,
+                if ($3.expression_type == IMMEDIATE)
+                   gen_move_immediate(program, location, $3.value);
+                else
+                   gen_add_instruction(program,
                                       location,
                                       REG_0,
                                       $3.value,
                                       CG_DIRECT_ALL);
 
                /* free the memory associated with the IDENTIFIER */
+	       }
                free($1);
             }
+	    | MUL_OP IDENTIFIER ASSIGN exp {
+		int location;
+
+               /* in order to assign a value to a variable, we have to
+                * know where the variable is located (i.e. in which register).
+                * the function `get_symbol_location' is used in order
+                * to retrieve the register location assigned to
+                * a given identifier.
+                * A symbol table keeps track of the location of every
+                * declared variable.
+                * `get_symbol_location' perform a query on the symbol table
+                * in order to discover the correct location of
+                * the variable with $1 as identifier */
+               
+               /* get the location of the symbol with the given ID. */
+	       t_list* temp = pointer_list;
+	       int found = 0;
+	       while(temp != NULL) {
+	       	pointer* pointer_ = (pointer*) temp->data;
+		if(strcmp(pointer_->name, $2) == 0) {
+			if ($4.expression_type == IMMEDIATE)
+                   		gen_move_immediate(program, pointer_->address, $4.value);
+                	else
+                   		gen_add_instruction(program,
+                                      	pointer_->address,
+                                      	REG_0,
+                                      	$4.value,
+                                      	CG_DIRECT_ALL);
+			
+			found = 1;
+			break;
+		}
+		temp = temp->next;
+	       }
+	       if(!found) {
+	        printf("%s is not a pointer\n", $2);
+		free($2);
+		abort();
+	       }
+	       free($2);
+	    }
 ;
             
 if_statement   : if_stmt
@@ -594,6 +674,32 @@ exp: NUMBER      { $$ = create_expression ($1, IMMEDIATE); }
 
                      /* free the memory associated with the IDENTIFIER */
                      free($1);
+   }
+   
+   | AND_OP IDENTIFIER {
+	int location = get_symbol_location(program, $2, 0);
+	free($2);
+	$$ = create_expression(location, IMMEDIATE); //return its address!
+	
+   }
+   | MUL_OP IDENTIFIER {
+	t_list* temp = pointer_list;
+	int found = 0;
+	while(temp != NULL) {
+		pointer* pointer_ = (pointer*) temp->data;
+		if(strcmp(pointer_->name, $2) == 0) {
+			$$ = create_expression(pointer_->address, REGISTER);
+			found = 1;
+			break;
+		}
+		temp = temp->next;
+	}
+	if(!found) {
+		printf("%s is not a pointer\n", $2);
+		free($2);
+		abort();
+	}
+	free($2);
    }
    | NOT_OP NUMBER   {  if ($2 == 0)
                            $$ = create_expression (1, IMMEDIATE);

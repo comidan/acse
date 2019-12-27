@@ -10,7 +10,7 @@
 #ifndef _AXE_STRUCT_H
 #define _AXE_STRUCT_H
 
-#include <malloc/malloc.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
 #include "axe_constants.h"
@@ -21,6 +21,16 @@
 #ifndef _AXE_FREE_FUNCTION
 #  define _AXE_FREE_FUNCTION free
 #endif
+
+typedef struct {
+	char* name;
+	int address;
+}pointer;
+
+typedef struct {
+	char* name;
+	int value;
+}defines;
 
 typedef struct t_axe_label
 {
@@ -114,17 +124,19 @@ typedef struct t_while_statement
                                     * that follows the while construct */
 } t_while_statement;
 
-typedef struct t_unless_statement {
-	t_axe_label * code_block;
-	t_axe_label * condition;
-	t_axe_label * end;
-} t_unless_statement;
+typedef struct t_forall_statement
+{
+   t_axe_label *label_condition;   /* this label points to the expression
+                                    * that is used as loop condition */
+   t_axe_label *label_end;         /* this label points to the instruction
+                                    * that follows the forall construct */
+   t_axe_label *label_jump_next;
+   
+   t_axe_expression loop_condition;
 
-typedef struct t_foreach_statement {
-	int counter;
-	t_axe_label * iteration;
-	t_axe_label * end;
-} t_foreach_statement;
+   int index_location;
+
+} t_forall_statement;
 
 /* create a label */
 extern t_axe_label * alloc_label(int value);
@@ -135,7 +147,7 @@ extern t_axe_expression create_expression (int value, int type);
 /* create an instance that will mantain infos about a while statement */
 extern t_while_statement create_while_statement();
 
-extern t_unless_statement create_unless_statement();
+extern t_forall_statement create_forall_statement();
 
 /* create an instance of `t_axe_register' */
 extern t_axe_register * alloc_register(int ID, int indirect);

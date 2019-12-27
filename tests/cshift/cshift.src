@@ -1,0 +1,5 @@
+int a = 43981;
+int b = 10;
+write(a >>> 4);
+b = - b;
+write(b <<< 2);
