@@ -5,6 +5,7 @@ In this fork I added different functionalities here listed:
 * Implicit instruction
 * For loop support
 * Loop control support (continue and break)
+* Pointers (* and address control with &)
 
 Also, as funny bonus, an italian based language version!
 
@@ -13,6 +14,7 @@ Here all the keywords listed as a source code of the language.
 ```
 #CONSTANTINA X 3 //constant declaration
 numerino y = 5, z; //int declaration
+numerino *w = &y; //pointer assigned to a variable address
 5+6; //implicit instruction!
 z=1;
 faicose { //do while loop
