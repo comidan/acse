@@ -46,7 +46,7 @@ You can enjoy its use on MACE emulator or try to extend it furthermore!
 
 Credits to [zerbfra/acse](https://github.com/zerbfra/acse)
 
-#ACSE
+# ACSE
 
 ACSE (Advanced Compiler System for Education) is a simple compiler de- veloped for educational purpose as a tool for the course “Formal languages and compiler”. ACSE is able to translate a source code written in LanCE 1.3 (Language for Compilers Education) into an assembly for the MACE archi- tecture (see the MACE documentation in Chapter 3). Figure 1.1 shows the components mentioned above and their interaction.
 
